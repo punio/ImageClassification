@@ -9,6 +9,7 @@
     Title="MainWindow" Height="350" Width="525" AllowDrop="True">
 	<Grid>
 		<Grid.RowDefinitions>
+			<RowDefinition Height="Auto"/>
 			<RowDefinition Height="*"/>
 			<RowDefinition Height="Auto"/>
 		</Grid.RowDefinitions>
@@ -17,11 +18,23 @@
 			<ColumnDefinition Width="*"/>
 		</Grid.ColumnDefinitions>
 
-		<StackPanel>
-			<Button Content="学習" Click="Button_Click"/>
-			<ListBox ItemsSource="{Binding MachineInfo}"/>
-		</StackPanel>
-		<Grid Grid.Column="1">
+		<Button Content="学習" Click="Button_Click"/>
+		<ListView Grid.Row="1" ItemsSource="{Binding TestResult}">
+			<ListView.View>
+				<GridView>
+					<GridViewColumn Width="80">
+						<GridViewColumn.CellTemplate>
+							<DataTemplate>
+								<Image Source="{Binding FileName}"/>
+							</DataTemplate>
+						</GridViewColumn.CellTemplate>
+					</GridViewColumn>
+					<GridViewColumn Header="正解" DisplayMemberBinding="{Binding 正解}"/>
+					<GridViewColumn Header="結果" DisplayMemberBinding="{Binding 結果}"/>
+				</GridView>
+			</ListView.View>
+		</ListView>
+		<Grid Grid.Column="1" Grid.RowSpan="2">
 			<Grid.RowDefinitions>
 				<RowDefinition Height="*"/>
 				<RowDefinition Height="Auto"/>
@@ -29,6 +42,6 @@
 			<Image Source="{Binding DropFileName.Value}"/>
 			<TextBlock Grid.Row="1" Text="{Binding DropResult.Value}" FontSize="16"/>
 		</Grid>
-		<TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding Message.Value}"/>
+		<TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding Message.Value}"/>
 	</Grid>
 </Window>

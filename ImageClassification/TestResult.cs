@@ -6,13 +6,10 @@ using System.Threading.Tasks;
 
 namespace ImageClassification
 {
-	public enum ImageClass
+	public class TestResult
 	{
-		ガンダム = 0,
-		ぬこ,
-		艦これ大和,
-		艦これ武蔵,
-		戦艦大和,
-		戦艦武蔵
+		public string FileName { get; set; }
+		public string 正解 { get; set; }
+		public string 結果 { get; set; }
 	}
 }

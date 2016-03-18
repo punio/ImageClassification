@@ -37,18 +37,8 @@ namespace ImageClassification
 
 		private void MainWindow_Loaded(object sender, RoutedEventArgs e)
 		{
-			#region 学習用ファイルの検索ね
-			foreach (ImageClass i in Enum.GetValues(typeof(ImageClass)))
-			{
-				var dir = Path.Combine(TrainDataPath, i.ToString());
-				foreach (var file in Directory.EnumerateFiles(dir))
-				{
-					TrainDataList.Add(new ImageInformation { FileName = file, Class = i });
-				}
-			}
-			#endregion
-
 			#region 学習結果のロード
+			// ロードで前回の学習結果がそのまま使えると思っているんだけど・・・なんか違う気がする
 			_machineFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, VectorMachineFile);
 			_surfBowFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, SurfBowFile);
 
@@ -82,19 +72,54 @@ namespace ImageClassification
 
 		private void Button_Click(object sender, RoutedEventArgs e) => Task.Run(() =>
 		{
-			this.ComputeBagOfWords();
-			this.CreateVectorMachine();
+			try
+			{
+				#region 学習用ファイルの検索対象フォルダにあるフォルダをグループにします
+				TrainDataList.Clear();
+				TestDataList.Clear();
+				TrainDataClass.Clear();
+				var rand = new Random();
+				var classCount = 0;
+				foreach (var dir in Directory.GetDirectories(TrainDataPath))
+				{
+					TrainDataClass.Add(Path.GetFileName(dir));
+					foreach (var file in Directory.EnumerateFiles(dir))
+					{
+						if (rand.NextDouble() > 0.9)
+						{
+							// 学習用ファイルの中から1割くらいをテスト用データとしておく
+							TestDataList.Add(new ImageInformation { FileName = file, Class = classCount });
+						}
+						else
+						{
+							TrainDataList.Add(new ImageInformation { FileName = file, Class = classCount });
+						}
+					}
+					classCount++;
+				}
+				#endregion
+
+				this.ComputeBagOfWords();
+				this.CreateVectorMachine();
+				this.SelfTest();
+			}
+			catch (Exception exp)
+			{
+				Message.Value = $"Error. {exp.Message}";
+			}
 		});
 
 		#region GUIに出すよう
 		public ReactiveProperty<string> Message { get; } = new ReactiveProperty<string>();
-		public ReactiveCollection<KernelSupportVectorMachineInfo> MachineInfo { get; } = new ReactiveCollection<KernelSupportVectorMachineInfo>();
+		public ReactiveCollection<TestResult> TestResult { get; } = new ReactiveCollection<TestResult>();
 		public ReactiveProperty<string> DropFileName { get; } = new ReactiveProperty<string>();
 		public ReactiveProperty<string> DropResult { get; } = new ReactiveProperty<string>();
 		#endregion
 
 		const string TrainDataPath = @"F:\Images";
+		private List<string> TrainDataClass { get; } = new List<string>();
 		private List<ImageInformation> TrainDataList { get; } = new List<ImageInformation>();
+		private List<ImageInformation> TestDataList { get; } = new List<ImageInformation>();
 
 		#region Accord.NET
 		const int NumberOfWords = 200;  // 画像から抽出する特徴点の数・・・だとおもう
@@ -132,18 +157,25 @@ namespace ImageClassification
 
 			// 一応後始末
 			foreach (var i in trainImages) i.Dispose();
+			foreach (var i in trainRImages) i.Dispose();
 
 			// 出来上がった抽出君でそれぞれの画像の特徴点を求めておく（これを学習させる）
+			// 並列で読み込ませたかったけどGetFeatureVectorがスレッドセーフではなさそうなので頑張って1ファイルずつ求めます
 			Message.Value = "Get Vectors";
+			var counter = 0;
 			TrainDataList.ForEach(t =>
 			{
 				var image = ImageFunctions.FromFileClone(t.FileName);
 				t.VectorL = this._surfBow.GetFeatureVector(image);
-				image.Dispose();
 
-				image = ImageFunctions.FromFileClone(t.FileName).FlipHorizontal();
-				t.VectorR = this._surfBow.GetFeatureVector(image);
+				var rimage = image.FlipHorizontal();
+				t.VectorR = this._surfBow.GetFeatureVector(rimage);
+
 				image.Dispose();
+				rimage.Dispose();
+
+				counter++;
+				if ((counter % 100) == 0) Message.Value = $"Get Vectors {counter * 100.0 / TrainDataList.Count}%";   // 進捗出さないと不安すぎる
 			});
 		}
 
@@ -165,7 +197,10 @@ namespace ImageClassification
 			var output2 = TrainDataList.Select(t => (int)t.Class);
 			var teacher = new MulticlassSupportVectorLearning(_ksvm, input1.Concat(input2).ToArray(), output1.Concat(output2).ToArray());
 
-			teacher.Algorithm = (svm, classInputs, classOutputs, i, j) => new SequentialMinimalOptimization(svm, classInputs, classOutputs);
+			teacher.Algorithm = (svm, classInputs, classOutputs, i, j) => new SequentialMinimalOptimization(svm, classInputs, classOutputs)
+			{
+				UseComplexityHeuristic = true
+			};
 
 			// 学習開始
 			Message.Value = "学習開始";
@@ -174,20 +209,6 @@ namespace ImageClassification
 
 			// 一応保存
 			_ksvm.Save(_machineFile);
-
-			// 学習結果を表示してみる
-			MachineInfo.ClearOnScheduler();
-			for (var i = 0; i < classes; i++)
-			{
-				for (var j = 0; j < i; j++)
-				{
-					var machine = _ksvm[i, j];
-					var info = new KernelSupportVectorMachineInfo { Machine = machine };
-					info.Class1 = (ImageClass)i;
-					info.Class2 = (ImageClass)j;
-					MachineInfo.AddOnScheduler(info);
-				}
-			}
 		}
 
 		/// <summary>
@@ -203,6 +224,27 @@ namespace ImageClassification
 			return new ChiSquare();
 			//return new HistogramIntersection(1, 1);
 		}
+
+		/// <summary>
+		/// 学習用ファイルの一部(学習には使っていない)でテスト
+		/// </summary>
+		private void SelfTest()
+		{
+			Message.Value = "テスト中";
+			var hit = 0;
+			var count = 0;
+			this.TestResult.ClearOnScheduler();
+			TestDataList.ForEach(t =>
+			{
+				var data = new TestResult { FileName = t.FileName, 正解 = TrainDataClass[t.Class] };
+				data.結果 = Compute(t.FileName);
+				count++;
+				if (data.正解 == data.結果) hit++;
+				TestResult.AddOnScheduler(data);
+			});
+
+			Message.Value = $"{count}中 {hit}正解.  正解率 {hit * 100.0 / count}%";
+		}
 		#endregion
 
 		/// <summary>
@@ -210,10 +252,10 @@ namespace ImageClassification
 		/// </summary>
 		/// <param name="fileName"></param>
 		/// <returns></returns>
-		private ImageClass Compute(string fileName)
+		private string Compute(string fileName)
 		{
 			var image = ImageFunctions.FromFileClone(fileName);
-			var result = (ImageClass)_ksvm.Compute(this._surfBow.GetFeatureVector(image));
+			var result = TrainDataClass[_ksvm.Compute(this._surfBow.GetFeatureVector(image))];
 			image.Dispose();
 			return result;
 		}

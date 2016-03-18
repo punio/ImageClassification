@@ -14,6 +14,6 @@ namespace ImageClassification
 		public double[] VectorL { get; set; }
 		public double[] VectorR { get; set; }
 		// 分類
-		public ImageClass Class { get; set; }
+		public int Class { get; set; }
 	}
 }
